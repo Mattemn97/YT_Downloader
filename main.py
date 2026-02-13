@@ -1,151 +1,227 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import os
-from PIL import Image, ImageFilter
+import sys
+import traceback
+from colorama import Fore, init
+from tqdm import tqdm
+import yt_dlp
 
-# --------------------------
-# FUNZIONI DI SIMULAZIONE
-# --------------------------
+init(autoreset=True)
 
-def simulate_zoom(img, f_orig, f_new):
-    """
-    - f_new > f_orig → zoom (crop)
-    - f_new < f_orig → grandangolo con bordi sfocati
-    """
+# ==========================
+# CONFIGURAZIONE GRAFICA
+# ==========================
+TITLE_COLOR = Fore.MAGENTA
+MENU_COLOR = Fore.CYAN
+INPUT_COLOR = Fore.YELLOW
+OK_COLOR = Fore.GREEN
+ERR_COLOR = Fore.RED
+INFO_COLOR = Fore.BLUE
 
-    w, h = img.size
+DOWNLOAD_DIR = "download_audio"
+FFMPEG_PATH = r"C:\ffmpeg\bin"   # <-- FORZATO QUI (IGNORA IL PATH DI WINDOWS)
 
-    # -----------------------------
-    # 1) ZOOM (crop)
-    # -----------------------------
-    if f_new > f_orig:
-        zoom = f_new / f_orig
-        new_w = int(w / zoom)
-        new_h = int(h / zoom)
+# ==========================
+# UTILITÀ GRAFICHE
+# ==========================
+def clear():
+    os.system("cls" if os.name == "nt" else "clear")
 
-        left = (w - new_w) // 2
-        top = (h - new_h) // 2
-        right = left + new_w
-        bottom = top + new_h
+def header():
+    print(TITLE_COLOR + "=" * 60)
+    print(TITLE_COLOR + "      🎧 YT PLAYLIST AUDIO DOWNLOADER")
+    print(TITLE_COLOR + "=" * 60 + "\n")
 
-        return img.crop((left, top, right, bottom))
+def pause():
+    input(INPUT_COLOR + "\nPremi INVIO per continuare...")
 
-    # -----------------------------
-    # 2) GRANDANGOLO (expand con blur)
-    # -----------------------------
-    elif f_new < f_orig:
-        expand = f_orig / f_new
+# ==========================
+# PROGRESS BAR STABILE
+# ==========================
+class TqdmLogger:
+    def __init__(self):
+        self.pbar = None
 
-        new_w = int(w * expand)
-        new_h = int(h * expand)
-
-        # Crea sfondo sfocato: si parte dall'immagine ingrandita
-        blurred_bg = img.resize((new_w, new_h), Image.LANCZOS)
-        blurred_bg = blurred_bg.filter(ImageFilter.GaussianBlur(radius=50))
-
-        # Incolla l'immagine originale al centro
-        offset_x = (new_w - w) // 2
-        offset_y = (new_h - h) // 2
-
-        blurred_bg.paste(img, (offset_x, offset_y))
-        return blurred_bg
-
-    else:
-        return img.copy()
-
-
-# --------------------------
-# MENÙ GUIDATO
-# --------------------------
-
-def guided_flow_zoom():
-    os.system('cls' if os.name == 'nt' else 'clear')
-    print("— Generatore immagini a diverse lunghezze focali —\n")
-
-    # 1) Input immagine
-    while True:
-        img_path = input("1) Inserisci il percorso dell'immagine sorgente: ").strip()
-        if not os.path.isfile(img_path):
-            print("❌ File non trovato. Riprova.")
-            continue
+    def hook(self, d):
         try:
-            img = Image.open(img_path).convert("RGB")
+            if d["status"] == "downloading":
+                total = d.get("total_bytes") or d.get("total_bytes_estimate")
+                downloaded = d.get("downloaded_bytes", 0)
+
+                if total:
+                    if not self.pbar:
+                        self.pbar = tqdm(
+                            total=total,
+                            unit="B",
+                            unit_scale=True,
+                            desc="Scaricamento",
+                        )
+                    self.pbar.n = downloaded
+                    self.pbar.refresh()
+
+            elif d["status"] == "finished":
+                if self.pbar:
+                    self.pbar.close()
+                    self.pbar = None
+                print(OK_COLOR + "✔ Download completato, conversione in MP3...")
+
         except Exception:
-            print("❌ Formato immagine non valido.")
-            continue
-        break
+            pass  # La UI non deve mai rompersi
 
-    # 2) Focale originale
-    while True:
-        try:
-            focale_orig = float(input("\n2) Inserisci la focale originale (mm): ").strip())
-            break
-        except ValueError:
-            print("❌ Valore non valido, inserisci un numero.")
+# ==========================
+# CHECK FFMPEG
+# ==========================
+def check_ffmpeg():
+    ffmpeg_exe = os.path.join(FFMPEG_PATH, "ffmpeg.exe")
+    ffprobe_exe = os.path.join(FFMPEG_PATH, "ffprobe.exe")
 
-    # 3) Altre focali
-    focali = []
-    print("\n3) Inserisci le altre focali da simulare (mm)")
-    print("   (separate da spazio, es: 12 18 35 70 200)")
-    while True:
-        try:
-            raw = input("   → ").strip()
-            focali = [float(x) for x in raw.split()]
-            if len(focali) == 0:
-                print("❌ Inserisci almeno una focale.")
-                continue
-            break
-        except ValueError:
-            print("❌ Formato non valido. Usa numeri separati da spazio.")
+    return os.path.isfile(ffmpeg_exe) and os.path.isfile(ffprobe_exe)
 
-    # 4) Cartella output
-    out_dir = input("\n4) Nome cartella output [default: output_zoom]: ").strip() or "output_zoom"
-    os.makedirs(out_dir, exist_ok=True)
-
-    # 5) Formato di output
-    print("\n5) Formato output:")
-    print("   jpg | png | webp | tiff")
-    while True:
-        fmt = input("   → [default: jpg]: ").strip().lower() or "jpg"
-        if fmt in ("jpg", "jpeg", "png", "webp", "tiff"):
-            break
-        print("❌ Formato non valido.")
-
-    # 6) Anteprima impostazioni
-    print("\n📋 Anteprima impostazioni:")
-    print(f" • Immagine sorgente: {img_path}")
-    print(f" • Focale originale: {focale_orig} mm")
-    print(f" • Focali da generare: {', '.join(str(int(f)) + 'mm' for f in focali)}")
-    print(f" • Formato output: {fmt}")
-    print(f" • Cartella output: {out_dir}\n")
-
-    if input("Procedere con la generazione? [S/n]: ").strip().lower() in ("n", "no"):
-        print("❌ Operazione annullata.")
+# ==========================
+# DOWNLOAD PLAYLIST
+# ==========================
+def download_playlist_audio(url):
+    if not check_ffmpeg():
+        print(ERR_COLOR + "FFmpeg non trovato in C:\\ffmpeg\\bin")
+        print(INFO_COLOR + "Assicurati che esistano:")
+        print(INFO_COLOR + "  C:\\ffmpeg\\bin\\ffmpeg.exe")
+        print(INFO_COLOR + "  C:\\ffmpeg\\bin\\ffprobe.exe")
         return
 
-    # 7) Generazione immagini
-    base_name = os.path.splitext(os.path.basename(img_path))[0]
-    ext = f".{fmt}"
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    logger = TqdmLogger()
 
-    print("\n⏳ Generazione in corso...\n")
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(
+            DOWNLOAD_DIR, "%(playlist_index)02d - %(title)s.%(ext)s"
+        ),
+        "quiet": True,
+        "no_warnings": True,
+        "ignoreerrors": True,
 
-    for f_new in focali:
-        result = simulate_zoom(img, focale_orig, f_new)
+        # ===== BYPASS YOUTUBE 2026 =====
+        "cookiefile": "cookies.txt",
+        "user_agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/121.0.0.0 Safari/537.36"
+        ),
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+                "player_skip": ["webpage"]
+            }
+        },
 
-        kind = "WIDE" if f_new < focale_orig else "ZOOM"
-        out_name = f"{base_name}_{kind}_{int(f_new)}mm{ext}"
-        out_path = os.path.join(out_dir, out_name)
+        # ===== FORZA FFMPEG (IGNORA WINDOWS) =====
+        "ffmpeg_location": FFMPEG_PATH,
 
-        result.save(out_path)
-        print(f"✔  Salvata {kind} {int(f_new)}mm → {out_path}")
+        "progress_hooks": [logger.hook],
 
-    print("\n✅ Tutto fatto! Buona visione 🎉")
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+    }
 
+    try:
+        print(INFO_COLOR + "\nConnessione a YouTube (modalità stealth)... 🥷")
 
-# --------------------------
-# Entrypoint
-# --------------------------
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
 
+        if not info:
+            print(ERR_COLOR + "❌ Impossibile leggere la playlist.")
+            return
+
+        print(OK_COLOR + "\n🎉 Playlist scaricata correttamente!")
+        print(INFO_COLOR + f"File salvati in: {os.path.abspath(DOWNLOAD_DIR)}")
+
+    except yt_dlp.utils.DownloadError as e:
+        print(ERR_COLOR + "\n❌ Errore yt-dlp:")
+        print(ERR_COLOR + str(e))
+
+    except Exception as e:
+        print(ERR_COLOR + "\n💥 Errore imprevisto:")
+        print(ERR_COLOR + str(e))
+        print(ERR_COLOR + traceback.format_exc())
+
+# ==========================
+# SELEZIONE CARTELLA DOWNLOAD (SOLO INPUT TESTUALE)
+# ==========================
+def select_download_directory():
+    global DOWNLOAD_DIR
+
+    clear()
+    header()
+
+    print(INFO_COLOR + f"Cartella attuale: {os.path.abspath(DOWNLOAD_DIR)}\n")
+    print(MENU_COLOR + "Premi INVIO per usare questa cartella")
+    print(MENU_COLOR + "Oppure inserisci un nuovo percorso completo\n")
+
+    path = input(INPUT_COLOR + "Percorso: ").strip()
+
+    if path == "":
+        return
+
+    try:
+        # Se non esiste la crea automaticamente
+        os.makedirs(path, exist_ok=True)
+        DOWNLOAD_DIR = path
+        print(OK_COLOR + "\n✔ Cartella impostata correttamente.")
+    except Exception as e:
+        print(ERR_COLOR + f"\nErrore nel creare la cartella: {e}")
+        pause()
+
+# ==========================
+# MENU PRINCIPALE
+# ==========================
+def main_menu():
+    while True:
+        clear()
+        header()
+        print(MENU_COLOR + "1) Scarica audio da playlist YouTube")
+        print(MENU_COLOR + "2) Esci\n")
+
+        choice = input(INPUT_COLOR + "Selezione: ").strip()
+
+        if choice == "1":
+            url = input(INPUT_COLOR + "\nInserisci URL playlist: ").strip()
+
+            if not url.startswith("http"):
+                print(ERR_COLOR + "URL non valido.")
+                pause()
+                continue
+
+            select_download_directory()
+
+            clear()
+            header()
+            print(INFO_COLOR + f"Download in: {os.path.abspath(DOWNLOAD_DIR)}\n")
+
+            download_playlist_audio(url)
+            pause()
+
+        elif choice == "2":
+            print(OK_COLOR + "\nMissione compiuta. Alla prossima, comandante audio 🎶")
+            sys.exit(0)
+
+        else:
+            print(ERR_COLOR + "Scelta non valida.")
+            pause()
+
+# ==========================
+# ENTRY POINT
+# ==========================
 if __name__ == "__main__":
-    guided_flow_zoom()
+    try:
+        main_menu()
+    except KeyboardInterrupt:
+        print(ERR_COLOR + "\n\nInterruzione manuale. Nessun MP3 è stato ferito.")
+    except Exception as e:
+        print(ERR_COLOR + "\nErrore critico:")
+        print(ERR_COLOR + str(e))
+        print(ERR_COLOR + traceback.format_exc())
