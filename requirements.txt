@@ -1,6 +1,5 @@
 colorama
 tqdm
 yt-dlp
-zipfile
 urllib
 shutil
