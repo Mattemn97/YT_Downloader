@@ -4,6 +4,10 @@ import traceback
 from colorama import Fore, init
 from tqdm import tqdm
 import yt_dlp
+import zipfile
+import urllib.request
+import shutil
+
 
 init(autoreset=True)
 
@@ -68,13 +72,72 @@ class TqdmLogger:
             pass  # La UI non deve mai rompersi
 
 # ==========================
-# CHECK FFMPEG
+
+# ==========================
+# INSTALLAZIONE AUTOMATICA FFMPEG
+# ==========================
+def install_ffmpeg():
+    print(INFO_COLOR + "\n🛠 FFmpeg non trovato. Avvio installazione automatica...")
+
+    ffmpeg_zip_url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+    zip_path = "ffmpeg.zip"
+
+    try:
+        print(INFO_COLOR + "📥 Download FFmpeg...")
+        urllib.request.urlretrieve(ffmpeg_zip_url, zip_path)
+
+        print(INFO_COLOR + "📦 Estrazione pacchetto...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall("ffmpeg_temp")
+
+        # Trova la cartella estratta automaticamente (nome variabile, es: ffmpeg-2026-02-01-essentials_build)
+        extracted_dir = next(
+            (d for d in os.listdir("ffmpeg_temp") if os.path.isdir(os.path.join("ffmpeg_temp", d))),
+            None
+        )
+
+        if not extracted_dir:
+            print(ERR_COLOR + "❌ Errore durante l'estrazione di FFmpeg.")
+            return False
+
+        extracted_bin = os.path.join("ffmpeg_temp", extracted_dir, "bin")
+
+        # Crea percorso C:\ffmpeg\bin\
+        os.makedirs(FFMPEG_PATH, exist_ok=True)
+
+        print(INFO_COLOR + "📁 Copia file in C:\\ffmpeg\\bin")
+        for file in os.listdir(extracted_bin):
+            shutil.copy(os.path.join(extracted_bin, file), FFMPEG_PATH)
+
+        # Pulizia
+        os.remove(zip_path)
+        shutil.rmtree("ffmpeg_temp")
+
+        print(OK_COLOR + "✔ FFmpeg installato correttamente!\n")
+        return True
+
+    except Exception as e:
+        print(ERR_COLOR + f"❌ Installazione FFmpeg fallita: {e}")
+        return False
+
+
+# ==========================
+# CHECK + AUTO-INSTALL FFMPEG
 # ==========================
 def check_ffmpeg():
     ffmpeg_exe = os.path.join(FFMPEG_PATH, "ffmpeg.exe")
     ffprobe_exe = os.path.join(FFMPEG_PATH, "ffprobe.exe")
 
-    return os.path.isfile(ffmpeg_exe) and os.path.isfile(ffprobe_exe)
+    if os.path.isfile(ffmpeg_exe) and os.path.isfile(ffprobe_exe):
+        return True
+
+    print(ERR_COLOR + "⚠ FFmpeg non trovato nella cartella forzata C:\\ffmpeg\\bin")
+
+    # SOLO WINDOWS
+    if os.name == "nt":
+        return install_ffmpeg()
+
+    return False
 
 # ==========================
 # DOWNLOAD PLAYLIST
