@@ -1,5 +1,4 @@
 colorama
 tqdm
 yt-dlp
-urllib
 shutil
