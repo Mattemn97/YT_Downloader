@@ -10,7 +10,7 @@ FFmpeg.
 
 -   Download completo di playlist YouTube
 -   Conversione automatica in MP3 (192 kbps)
--   Barra di avanzamento con tqdm
+-   Barra di avanzamento e interfaccia con rich
 -   Selezione della cartella di destinazione da terminale
 -   Gestione errori robusta
 -   Forzatura manuale del percorso FFmpeg
